@@ -37,7 +37,6 @@ import wavefront.report.SpanLog;
 import wavefront.report.SpanLogs;
 
 import static com.wavefront.agent.listeners.FeatureCheckUtils.SPANLOGS_DISABLED;
-import static com.wavefront.agent.listeners.FeatureCheckUtils.SPAN_DISABLED;
 import static com.wavefront.agent.listeners.FeatureCheckUtils.isFeatureDisabled;
 import static com.wavefront.internal.SpanDerivedMetricsUtils.DEBUG_SPAN_TAG_VAL;
 import static com.wavefront.internal.SpanDerivedMetricsUtils.ERROR_SPAN_TAG_VAL;
@@ -70,21 +69,17 @@ public abstract class JaegerThriftUtils {
   }
 
   public static void processBatch(Batch batch,
-                                  @Nullable StringBuilder output,
                                   String sourceName,
                                   String applicationName,
                                   ReportableEntityHandler<Span, String> spanHandler,
                                   ReportableEntityHandler<SpanLogs, String> spanLogsHandler,
                                   @Nullable WavefrontInternalReporter wfInternalReporter,
-                                  Supplier<Boolean> traceDisabled,
                                   Supplier<Boolean> spanLogsDisabled,
                                   Supplier<ReportableEntityPreprocessor> preprocessorSupplier,
                                   SpanSampler sampler,
                                   Set<String> traceDerivedCustomTagKeys,
-                                  Counter discardedTraces,
-                                  Counter discardedBatches,
                                   Counter discardedSpansBySampler,
-                                  Set<Pair<Map<String, String>, String>> discoveredHeartbeatMetrics) {
+                                  Set<Pair<Map<String, String>, String>> discoveredHeartbeatMetrics, Counter spansSentToProxy) {
     String serviceName = batch.getProcess().getServiceName();
     List<Annotation> processAnnotations = new ArrayList<>();
     boolean isSourceProcessTagPresent = false;
@@ -117,10 +112,8 @@ public abstract class JaegerThriftUtils {
         }
       }
     }
-    if (isFeatureDisabled(traceDisabled, SPAN_DISABLED, discardedBatches, output)) {
-      discardedTraces.inc(batch.getSpansSize());
-      return;
-    }
+
+    spansSentToProxy.inc(batch.getSpansSize());
     for (io.jaegertracing.thriftjava.Span span : batch.getSpans()) {
       processSpan(span, serviceName, sourceName, applicationName, processAnnotations,
           spanHandler, spanLogsHandler, wfInternalReporter, spanLogsDisabled,

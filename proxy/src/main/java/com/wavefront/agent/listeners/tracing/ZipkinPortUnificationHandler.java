@@ -103,6 +103,7 @@ public class ZipkinPortUnificationHandler extends AbstractHttpOnlyHandler
   private final Counter processedBatches;
   private final Counter failedBatches;
   private final Counter discardedSpansBySampler;
+  private final Counter spansSentToProxy;
   private final Set<Pair<Map<String, String>, String>> discoveredHeartbeatMetrics;
   private final ScheduledExecutorService scheduledExecutorService;
 
@@ -166,6 +167,8 @@ public class ZipkinPortUnificationHandler extends AbstractHttpOnlyHandler
         "spans." + handle + ".batches", "", "failed"));
     this.discardedSpansBySampler = Metrics.newCounter(new MetricName(
         "spans." + handle, "", "sampler.discarded"));
+    this.spansSentToProxy = Metrics.newCounter(new MetricName(
+        "spans." + handle, "", "sent.count"));
     this.discoveredHeartbeatMetrics = Sets.newConcurrentHashSet();
     this.scheduledExecutorService = Executors.newScheduledThreadPool(1,
         new NamedThreadFactory("zipkin-heart-beater"));
@@ -217,6 +220,7 @@ public class ZipkinPortUnificationHandler extends AbstractHttpOnlyHandler
       BytesDecoder<zipkin2.Span> decoder = SpanBytesDecoderDetector.decoderForListMessage(bytesArray);
       List<zipkin2.Span> zipkinSpanSink = new ArrayList<>();
       decoder.decodeList(bytesArray, zipkinSpanSink);
+      spansSentToProxy.inc(zipkinSpanSink.size());
       processZipkinSpans(zipkinSpanSink);
       status = HttpResponseStatus.ACCEPTED;
       processedBatches.inc();

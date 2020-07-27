@@ -87,6 +87,7 @@ public class WavefrontPortUnificationHandler extends AbstractLineDelimitedHandle
 
   private final SpanSampler sampler;
 
+  private final Supplier<Counter> spansSentToProxy;
   private final Supplier<Counter> discardedHistograms;
   private final Supplier<Counter> discardedSpans;
   private final Supplier<Counter> discardedSpanLogs;
@@ -157,6 +158,8 @@ public class WavefrontPortUnificationHandler extends AbstractLineDelimitedHandle
         "spans." + handle, "", "sampler.discarded")));
     this.discardedSpanLogsBySampler = Utils.lazySupplier(() -> Metrics.newCounter(new MetricName(
         "spanLogs." + handle, "", "sampler.discarded")));
+    this.spansSentToProxy = Utils.lazySupplier(() -> Metrics.newCounter(new MetricName(
+        "spans." + handle, "", "sent.count")));
   }
 
   @Override
@@ -236,6 +239,7 @@ public class WavefrontPortUnificationHandler extends AbstractLineDelimitedHandle
           return;
         }
         message = annotator == null ? message : annotator.apply(ctx, message);
+        spansSentToProxy.get().inc();
         preprocessAndHandleSpan(message, spanDecoder, spanHandler, spanHandler::report,
             preprocessorSupplier, ctx, span -> sampler.sample(span, discardedSpansBySampler.get()));
         return;

@@ -49,6 +49,8 @@ import java.util.logging.Logger;
 
 import static com.wavefront.agent.channel.ChannelUtils.errorMessageWithRootCause;
 import static com.wavefront.agent.channel.ChannelUtils.writeHttpResponse;
+import static com.wavefront.agent.listeners.FeatureCheckUtils.SPAN_DISABLED;
+import static com.wavefront.agent.listeners.FeatureCheckUtils.isFeatureDisabled;
 import static com.wavefront.agent.listeners.tracing.JaegerThriftUtils.processBatch;
 import static com.wavefront.internal.SpanDerivedMetricsUtils.TRACING_DERIVED_PREFIX;
 import static com.wavefront.internal.SpanDerivedMetricsUtils.reportHeartbeats;
@@ -79,6 +81,7 @@ public class JaegerPortUnificationHandler extends AbstractHttpOnlyHandler implem
   private final String proxyLevelApplicationName;
   private final Set<String> traceDerivedCustomTagKeys;
 
+  private final Counter spansSentToProxy;
   private final Counter discardedTraces;
   private final Counter discardedBatches;
   private final Counter processedBatches;
@@ -142,6 +145,8 @@ public class JaegerPortUnificationHandler extends AbstractHttpOnlyHandler implem
         new MetricName("spans." + handle + ".batches", "", "failed"));
     this.discardedSpansBySampler = Metrics.newCounter(
         new MetricName("spans." + handle, "", "sampler.discarded"));
+    this.spansSentToProxy = Metrics.newCounter(new MetricName(
+        "spans." + handle, "", "sent.count"));
     this.discoveredHeartbeatMetrics = Sets.newConcurrentHashSet();
     this.scheduledExecutorService = Executors.newScheduledThreadPool(1,
         new NamedThreadFactory("jaeger-heart-beater"));
@@ -180,16 +185,21 @@ public class JaegerPortUnificationHandler extends AbstractHttpOnlyHandler implem
     HttpResponseStatus status;
     StringBuilder output = new StringBuilder();
 
+    if (isFeatureDisabled(traceDisabled, SPAN_DISABLED, discardedBatches, output)) {
+      status = HttpResponseStatus.ACCEPTED;
+      writeHttpResponse(ctx, status, output, request);
+      return;
+    }
+
     try {
       byte[] bytesArray = new byte[request.content().nioBuffer().remaining()];
       request.content().nioBuffer().get(bytesArray, 0, bytesArray.length);
       Batch batch = new Batch();
       new TDeserializer().deserialize(batch, bytesArray);
-
-      processBatch(batch, output, DEFAULT_SOURCE, proxyLevelApplicationName, spanHandler,
-          spanLogsHandler, wfInternalReporter, traceDisabled, spanLogsDisabled,
+      processBatch(batch, DEFAULT_SOURCE, proxyLevelApplicationName, spanHandler,
+          spanLogsHandler, wfInternalReporter, spanLogsDisabled,
           preprocessorSupplier, sampler, traceDerivedCustomTagKeys,
-          discardedTraces, discardedBatches, discardedSpansBySampler, discoveredHeartbeatMetrics);
+          discardedSpansBySampler, discoveredHeartbeatMetrics, spansSentToProxy);
       status = HttpResponseStatus.ACCEPTED;
       processedBatches.inc();
     } catch (Exception e) {

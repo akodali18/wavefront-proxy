@@ -40,6 +40,8 @@ import java.util.function.Supplier;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import static com.wavefront.agent.listeners.FeatureCheckUtils.SPAN_DISABLED;
+import static com.wavefront.agent.listeners.FeatureCheckUtils.isFeatureDisabled;
 import static com.wavefront.agent.listeners.tracing.JaegerProtobufUtils.processBatch;
 import static com.wavefront.internal.SpanDerivedMetricsUtils.TRACING_DERIVED_PREFIX;
 import static com.wavefront.internal.SpanDerivedMetricsUtils.reportHeartbeats;
@@ -70,6 +72,7 @@ public class JaegerGrpcCollectorHandler extends CollectorServiceGrpc.CollectorSe
   private final String proxyLevelApplicationName;
   private final Set<String> traceDerivedCustomTagKeys;
 
+  private final Counter spansSentToProxy;
   private final Counter discardedTraces;
   private final Counter discardedBatches;
   private final Counter processedBatches;
@@ -123,6 +126,8 @@ public class JaegerGrpcCollectorHandler extends CollectorServiceGrpc.CollectorSe
         new MetricName("spans." + handle + ".batches", "", "failed"));
     this.discardedSpansBySampler = Metrics.newCounter(
         new MetricName("spans." + handle, "", "sampler.discarded"));
+    this.spansSentToProxy = Metrics.newCounter(new MetricName(
+        "spans." + handle, "", "sent.count"));
     this.discoveredHeartbeatMetrics = Sets.newConcurrentHashSet();
     this.scheduledExecutorService = Executors.newScheduledThreadPool(1,
         new NamedThreadFactory("jaeger-heart-beater"));
@@ -142,16 +147,20 @@ public class JaegerGrpcCollectorHandler extends CollectorServiceGrpc.CollectorSe
   @Override
   public void postSpans(Collector.PostSpansRequest request,
                         StreamObserver<Collector.PostSpansResponse> responseObserver) {
-    try {
-      processBatch(request.getBatch(), null, DEFAULT_SOURCE, proxyLevelApplicationName,
-          spanHandler, spanLogsHandler, wfInternalReporter, traceDisabled, spanLogsDisabled,
-          preprocessorSupplier, sampler, traceDerivedCustomTagKeys, discardedTraces,
-          discardedBatches, discardedSpansBySampler, discoveredHeartbeatMetrics);
-      processedBatches.inc();
-    } catch (Exception e) {
-      failedBatches.inc();
-      logger.log(Level.WARNING, "Jaeger Protobuf batch processing failed",
-          Throwables.getRootCause(e));
+    if (isFeatureDisabled(traceDisabled, SPAN_DISABLED, discardedBatches, null)) {
+      discardedTraces.inc(request.getBatch().getSpansCount());
+    } else {
+      try {
+        processBatch(request.getBatch(), DEFAULT_SOURCE, proxyLevelApplicationName,
+            spanHandler, spanLogsHandler, wfInternalReporter, spanLogsDisabled,
+            preprocessorSupplier, sampler, traceDerivedCustomTagKeys,
+            discardedSpansBySampler, discoveredHeartbeatMetrics, spansSentToProxy);
+        processedBatches.inc();
+      } catch (Exception e) {
+        failedBatches.inc();
+        logger.log(Level.WARNING, "Jaeger Protobuf batch processing failed",
+            Throwables.getRootCause(e));
+      }
     }
     responseObserver.onNext(Collector.PostSpansResponse.newBuilder().build());
     responseObserver.onCompleted();

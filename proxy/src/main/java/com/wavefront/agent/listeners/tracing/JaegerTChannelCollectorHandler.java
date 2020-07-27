@@ -41,6 +41,8 @@ import java.util.function.Supplier;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import static com.wavefront.agent.listeners.FeatureCheckUtils.SPAN_DISABLED;
+import static com.wavefront.agent.listeners.FeatureCheckUtils.isFeatureDisabled;
 import static com.wavefront.agent.listeners.tracing.JaegerThriftUtils.processBatch;
 import static com.wavefront.internal.SpanDerivedMetricsUtils.TRACING_DERIVED_PREFIX;
 import static com.wavefront.internal.SpanDerivedMetricsUtils.reportHeartbeats;
@@ -72,6 +74,7 @@ public class JaegerTChannelCollectorHandler extends ThriftRequestHandler<Collect
   private final String proxyLevelApplicationName;
   private final Set<String> traceDerivedCustomTagKeys;
 
+  private final Counter spansSentToProxy;
   private final Counter discardedTraces;
   private final Counter discardedBatches;
   private final Counter processedBatches;
@@ -125,6 +128,8 @@ public class JaegerTChannelCollectorHandler extends ThriftRequestHandler<Collect
         new MetricName("spans." + handle + ".batches", "", "failed"));
     this.discardedSpansBySampler = Metrics.newCounter(
         new MetricName("spans." + handle, "", "sampler.discarded"));
+    this.spansSentToProxy = Metrics.newCounter(new MetricName(
+        "spans." + handle, "", "sent.count"));
     this.discoveredHeartbeatMetrics = Sets.newConcurrentHashSet();
     this.scheduledExecutorService = Executors.newScheduledThreadPool(1,
         new NamedThreadFactory("jaeger-heart-beater"));
@@ -145,11 +150,15 @@ public class JaegerTChannelCollectorHandler extends ThriftRequestHandler<Collect
   public ThriftResponse<Collector.submitBatches_result> handleImpl(
       ThriftRequest<Collector.submitBatches_args> request) {
     for (Batch batch : request.getBody(Collector.submitBatches_args.class).getBatches()) {
+      if (isFeatureDisabled(traceDisabled, SPAN_DISABLED, discardedBatches, null)) {
+        discardedTraces.inc(batch.getSpansSize());
+        continue;
+      }
       try {
-        processBatch(batch, null, DEFAULT_SOURCE, proxyLevelApplicationName, spanHandler,
-            spanLogsHandler, wfInternalReporter, traceDisabled, spanLogsDisabled,
-            preprocessorSupplier, sampler, traceDerivedCustomTagKeys, discardedTraces,
-            discardedBatches, discardedSpansBySampler, discoveredHeartbeatMetrics);
+        processBatch(batch, DEFAULT_SOURCE, proxyLevelApplicationName, spanHandler,
+            spanLogsHandler, wfInternalReporter, spanLogsDisabled,
+            preprocessorSupplier, sampler, traceDerivedCustomTagKeys,
+            discardedSpansBySampler, discoveredHeartbeatMetrics, spansSentToProxy);
         processedBatches.inc();
       } catch (Exception e) {
         failedBatches.inc();

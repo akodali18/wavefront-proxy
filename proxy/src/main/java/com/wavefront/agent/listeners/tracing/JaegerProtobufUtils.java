@@ -42,7 +42,6 @@ import static com.google.protobuf.util.Durations.toMillis;
 import static com.google.protobuf.util.Timestamps.toMicros;
 import static com.google.protobuf.util.Timestamps.toMillis;
 import static com.wavefront.agent.listeners.FeatureCheckUtils.SPANLOGS_DISABLED;
-import static com.wavefront.agent.listeners.FeatureCheckUtils.SPAN_DISABLED;
 import static com.wavefront.agent.listeners.FeatureCheckUtils.isFeatureDisabled;
 import static com.wavefront.internal.SpanDerivedMetricsUtils.DEBUG_SPAN_TAG_VAL;
 import static com.wavefront.internal.SpanDerivedMetricsUtils.ERROR_SPAN_TAG_VAL;
@@ -75,21 +74,18 @@ public abstract class JaegerProtobufUtils {
   }
 
   public static void processBatch(Model.Batch batch,
-                                  @Nullable StringBuilder output,
                                   String sourceName,
                                   String applicationName,
                                   ReportableEntityHandler<Span, String> spanHandler,
                                   ReportableEntityHandler<SpanLogs, String> spanLogsHandler,
                                   @Nullable WavefrontInternalReporter wfInternalReporter,
-                                  Supplier<Boolean> traceDisabled,
                                   Supplier<Boolean> spanLogsDisabled,
                                   Supplier<ReportableEntityPreprocessor> preprocessorSupplier,
                                   SpanSampler sampler,
                                   Set<String> traceDerivedCustomTagKeys,
-                                  Counter discardedTraces,
-                                  Counter discardedBatches,
                                   Counter discardedSpansBySampler,
-                                  Set<Pair<Map<String, String>, String>> discoveredHeartbeatMetrics) {
+                                  Set<Pair<Map<String, String>, String>> discoveredHeartbeatMetrics,
+                                  Counter spansSentToProxy) {
     String serviceName = batch.getProcess().getServiceName();
     List<Annotation> processAnnotations = new ArrayList<>();
     boolean isSourceProcessTagPresent = false;
@@ -122,10 +118,7 @@ public abstract class JaegerProtobufUtils {
         }
       }
     }
-    if (isFeatureDisabled(traceDisabled, SPAN_DISABLED, discardedBatches, output)) {
-      discardedTraces.inc(batch.getSpansCount());
-      return;
-    }
+    spansSentToProxy.inc(batch.getSpansCount());
     for (Model.Span span : batch.getSpansList()) {
       processSpan(span, serviceName, sourceName, applicationName, processAnnotations,
           spanHandler, spanLogsHandler, wfInternalReporter, spanLogsDisabled,
